@@ -1,14 +1,23 @@
 import { parseJson } from "@/app/utils/string.util";
 import ReactJsonView from "@microlink/react-json-view";
 import axios from "axios";
-import { isEmpty, isNil, isString, keys } from "lodash";
-import { useEffect, useState } from "react";
+import {
+  entries,
+  includes,
+  isEmpty,
+  isNil,
+  isString,
+  keys,
+  uniqueId,
+} from "lodash";
+import { ReactNode, useEffect, useState } from "react";
+import Input from "../form-control/Input";
 
 const CambridgePlayground = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>();
 
-  const [model, setModel] = useState("gpt-4o");
+  const [model, setModel] = useState("gpt-4.1");
   const [evaluationConfig, setEvaluationConfig] = useState({
     name: "",
     instruction: "",
@@ -16,11 +25,18 @@ const CambridgePlayground = () => {
   // const [questionFiles, setQuestionFiles] = useState<Record<string, File>>({});
   const [questions, setQuestions] = useState<
     {
+      key: string;
       type: string;
       value: string;
     }[]
   >([]);
-  const [answer, setAnswer] = useState("");
+  const [answers, setAnswers] = useState<
+    {
+      key: string;
+      type: string;
+      value: string;
+    }[]
+  >([]);
 
   const [storedEvaluationConfigs, setStoredEvaluationConfigs] = useState(() => {
     const evaluationConfigs = parseJson(
@@ -187,6 +203,33 @@ const CambridgePlayground = () => {
   //     ];
   //   }, [questionContent, questionDescription, answer]);
 
+  const validateModalitiesSupport = (type: "text" | "image" | "audio") => {
+    const result = {
+      support: false,
+      message: "",
+    };
+
+    switch (model) {
+      case "gpt-4o-audio-preview": {
+        if (includes(["text", "audio"], type)) {
+          result.support = true;
+        } else {
+          result.message = `The ${model} model does not support ${type}`;
+        }
+        break;
+      }
+      default: {
+        if (includes(["text", "image"], type)) {
+          result.support = true;
+        } else {
+          result.message = `The ${model} model does not support ${type}`;
+        }
+      }
+    }
+
+    return result;
+  };
+
   const handleAddSampleIntoFormData = (sampleId: string) => {
     const sampleInfo = sample[sampleId];
 
@@ -197,11 +240,19 @@ const CambridgePlayground = () => {
 
     setQuestions([
       {
+        key: sampleId,
         type: "text",
         value: sampleInfo.questionContent,
       },
     ]);
-    setAnswer(sampleInfo.answer);
+
+    setAnswers([
+      {
+        key: sampleId,
+        type: "text",
+        value: sampleInfo.answer,
+      },
+    ]);
   };
 
   const onFormSubmit = async () => {
@@ -250,7 +301,7 @@ const CambridgePlayground = () => {
           model,
           instruction: evaluationConfig.instruction,
           questions,
-          answer,
+          answers,
         },
       })
       .then(({ data }) => {
@@ -345,7 +396,7 @@ const CambridgePlayground = () => {
           </div>
 
           <div className="flex flex-col gap-2">
-            <label>Evaluation configs</label>
+            <label className="font-bold">Evaluation configs</label>
 
             <label className="ml-2 flex items-center gap-2">
               <span className="text-sm">select stored configs:</span>
@@ -403,15 +454,16 @@ const CambridgePlayground = () => {
           </div>
 
           <div className="flex flex-col gap-2">
-            <label>Question configs</label>
+            <label className="font-bold">Question configs</label>
 
-            {questions.map(({ type, value }, index) => {
+            {questions.map(({ key, type, value }, index) => {
+              let control = null;
+
               switch (type) {
                 case "image":
-                  return (
+                  control = (
                     <input
-                      key={index}
-                      className="rounded-sm border border-solid border-gray-300"
+                      className="flex-1 rounded-sm border border-solid border-gray-300"
                       type="file"
                       accept="image/*"
                       onChange={(event) => {
@@ -452,11 +504,11 @@ const CambridgePlayground = () => {
                       }}
                     />
                   );
+                  break;
                 case "audio":
-                  return (
+                  control = (
                     <input
-                      key={index}
-                      className="rounded-sm border border-solid border-gray-300"
+                      className="flex-1 rounded-sm border border-solid border-gray-300"
                       type="file"
                       accept="audio/mpeg"
                       onChange={(event) => {
@@ -497,12 +549,12 @@ const CambridgePlayground = () => {
                       }}
                     />
                   );
+                  break;
                 default:
-                  return (
+                  control = (
                     <textarea
-                      key={index}
                       rows={3}
-                      className="rounded-sm border border-solid border-gray-300"
+                      className="flex-1 rounded-sm border border-solid border-gray-300"
                       value={String(value)}
                       onChange={(event) => {
                         setQuestions((prev) => {
@@ -515,6 +567,24 @@ const CambridgePlayground = () => {
                     ></textarea>
                   );
               }
+
+              return (
+                <div key={key} className="flex justify-between gap-2">
+                  {control}
+                  <span
+                    className="shrink-0 cursor-pointer"
+                    onClick={() => {
+                      setQuestions((prev) => {
+                        return [...prev].filter(
+                          (question) => question.key !== key
+                        );
+                      });
+                    }}
+                  >
+                    ❌
+                  </span>
+                </div>
+              );
             })}
 
             <div className="flex items-center gap-4 [&>button]:cursor-pointer">
@@ -524,6 +594,7 @@ const CambridgePlayground = () => {
                   setQuestions((prev) => [
                     ...prev,
                     {
+                      key: uniqueId("question"),
                       type: "text",
                       value: "",
                     },
@@ -532,12 +603,22 @@ const CambridgePlayground = () => {
               >
                 ➕ text
               </button>
+
               <button
                 type="button"
                 onClick={() => {
+                  const { support, message } =
+                    validateModalitiesSupport("image");
+
+                  if (!support) {
+                    alert(message);
+                    return;
+                  }
+
                   setQuestions((prev) => [
                     ...prev,
                     {
+                      key: uniqueId("question"),
                       type: "image",
                       value: "",
                     },
@@ -546,35 +627,200 @@ const CambridgePlayground = () => {
               >
                 ➕ image
               </button>
+
               <button
                 type="button"
                 onClick={() => {
-                  alert("Coming soon");
-                  // setQuestions((prev) => [
-                  //   ...prev,
-                  //   {
-                  //     type: "audio",
-                  //     value: "",
-                  //   },
-                  // ]);
+                  const { support, message } =
+                    validateModalitiesSupport("audio");
+
+                  if (!support) {
+                    alert(message);
+                    return;
+                  }
+
+                  setQuestions((prev) => [
+                    ...prev,
+                    {
+                      key: uniqueId("question"),
+                      type: "audio",
+                      value: "",
+                    },
+                  ]);
                 }}
               >
-                ➕ audio (WIP)
+                ➕ audio
               </button>
             </div>
           </div>
 
           <div className="flex flex-col gap-2">
-            <label>Answer</label>
+            <label className="font-bold">Answer</label>
 
-            <textarea
-              rows={3}
-              className="rounded-sm border border-solid border-gray-300"
-              value={answer}
-              onChange={(event) => {
-                setAnswer(event.target.value);
-              }}
-            ></textarea>
+            {answers.map(({ key, type, value }, index) => {
+              let control = null;
+
+              switch (type) {
+                case "image":
+                  control = (
+                    <Input
+                      className="flex-1"
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => {
+                        const files = event.target.files;
+
+                        if (isNil(files) || isNil(files[0])) return;
+
+                        const fr = new FileReader();
+
+                        fr.readAsDataURL(files[0]);
+
+                        fr.addEventListener("load", (event) => {
+                          setAnswers((prev) => {
+                            const newAnswers = [...prev];
+                            newAnswers[index].value = String(
+                              event.target?.result
+                            );
+
+                            return newAnswers;
+                          });
+                        });
+                      }}
+                    />
+                  );
+                  break;
+                case "audio":
+                  control = (
+                    <Input
+                      className="flex-1"
+                      type="file"
+                      accept="audio/mpeg"
+                      onChange={(event) => {
+                        const files = event.target.files;
+
+                        if (isNil(files) || isNil(files[0])) return;
+
+                        const fr = new FileReader();
+
+                        fr.readAsDataURL(files[0]);
+
+                        fr.addEventListener("load", (event) => {
+                          setAnswers((prev) => {
+                            const newAnswers = [...prev];
+                            newAnswers[index].value = String(
+                              event.target?.result
+                            );
+
+                            return newAnswers;
+                          });
+                        });
+                      }}
+                    />
+                  );
+                  break;
+                default:
+                  control = (
+                    <textarea
+                      rows={3}
+                      className="flex-1 rounded-sm border border-solid border-gray-300"
+                      value={String(value)}
+                      onChange={(event) => {
+                        setAnswers((prev) => {
+                          const newAnswers = [...prev];
+                          newAnswers[index].value = event.target.value;
+
+                          return newAnswers;
+                        });
+                      }}
+                    ></textarea>
+                  );
+              }
+
+              return (
+                <div key={key} className="flex justify-between gap-2">
+                  {control}
+                  <span
+                    className="shrink-0 cursor-pointer"
+                    onClick={() => {
+                      setAnswers((prev) => {
+                        return [...prev].filter(
+                          (question) => question.key !== key
+                        );
+                      });
+                    }}
+                  >
+                    ❌
+                  </span>
+                </div>
+              );
+            })}
+
+            <div className="flex items-center gap-4 [&>button]:cursor-pointer">
+              <button
+                type="button"
+                onClick={() => {
+                  setAnswers((prev) => [
+                    ...prev,
+                    {
+                      key: uniqueId("answer"),
+                      type: "text",
+                      value: "",
+                    },
+                  ]);
+                }}
+              >
+                ➕ text
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const { support, message } =
+                    validateModalitiesSupport("image");
+
+                  if (!support) {
+                    alert(message);
+                    return;
+                  }
+
+                  setAnswers((prev) => [
+                    ...prev,
+                    {
+                      key: uniqueId("answer"),
+                      type: "image",
+                      value: "",
+                    },
+                  ]);
+                }}
+              >
+                ➕ image
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const { support, message } =
+                    validateModalitiesSupport("audio");
+
+                  if (!support) {
+                    alert(message);
+                    return;
+                  }
+
+                  setAnswers((prev) => [
+                    ...prev,
+                    {
+                      key: uniqueId("answer"),
+                      type: "audio",
+                      value: "",
+                    },
+                  ]);
+                }}
+              >
+                ➕ audio
+              </button>
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">
@@ -586,8 +832,11 @@ const CambridgePlayground = () => {
                 setModel(event.target.value);
               }}
             >
-              <option value={"gpt-4o"}>gpt-4o</option>
               <option value={"gpt-4.1"}>gpt-4.1</option>
+              <option value={"gpt-4o-audio-preview"}>
+                gpt-4o-audio-preview
+              </option>
+              <option value={"gpt-4o"}>gpt-4o</option>
               <option value={"o4-mini"}>o4-mini</option>
               <option value={"o3"}>o3</option>
               <option value={"o3-mini"}>o3-mini</option>
@@ -595,19 +844,30 @@ const CambridgePlayground = () => {
           </div>
         </div>
 
-        <div className="flex basis-1/2 flex-col rounded-md">
+        <div className="flex basis-1/2 overflow-hidden flex-col rounded-md">
           <div className="mt-2 flex flex-col gap-3">
             <span className="text-2xl">AI response: </span>
             <div className="rounded-lg bg-slate-200 p-3">
               {isString(error) ? (
                 <i className="text-sm">{error}</i>
               ) : (
-                <ReactJsonView
-                  name={null}
-                  src={parseJson(serverResponse?.text) || {}}
-                  displayDataTypes={false}
-                  displayObjectSize={false}
-                />
+                // <ReactJsonView
+                //   name={null}
+                //   src={parseJson(serverResponse?.text) || {}}
+                //   displayDataTypes={false}
+                //   displayObjectSize={false}
+                // />
+
+                <div className="flex flex-col gap-4">
+                  {entries(parseJson(serverResponse?.text)).map(([k, v]) => {
+                    return (
+                      <div key={k} className="flex gap-4">
+                        <span className="basis-1/3">{k}:</span>
+                        <span className="basis-2/3">{v as ReactNode}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
@@ -650,7 +910,7 @@ const CambridgePlayground = () => {
               )} */}
             </div>
 
-            <div className="relative rounded-lg bg-slate-200 p-3">
+            <div className="relative rounded-lg bg-slate-200 p-3 w-full overflow-x-auto">
               <ReactJsonView
                 name={null}
                 src={serverResponse || {}}
@@ -658,29 +918,6 @@ const CambridgePlayground = () => {
                 displayObjectSize={false}
                 collapsed
               />
-
-              {/* <details>
-                <summary>detail</summary>
-
-                <div className="all-revert">
-                  <Markdown>{markdown}</Markdown>
-                </div>
-              </details> */}
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="flex items-center gap-2">
-              <p className="font-bold">Scheme (WIP):</p>
-            </div>
-
-            <div className="relative rounded-lg bg-slate-200 p-3">
-              {/* <ReactJsonView
-                name={null}
-                src={scheme || {}}
-                displayDataTypes={false}
-                displayObjectSize={false}
-                collapsed
-              /> */}
             </div>
           </div>
         </div>
@@ -696,7 +933,7 @@ const CambridgePlayground = () => {
               isLoading ||
               isEmpty(evaluationConfig?.instruction) ||
               isEmpty(questions) ||
-              isEmpty(answer)
+              isEmpty(answers)
             }
           >
             {isLoading ? (

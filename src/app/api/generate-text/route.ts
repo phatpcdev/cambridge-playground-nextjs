@@ -10,7 +10,8 @@ export async function POST(request: NextRequest) {
 
     const model = req?.model;
     const instruction = req?.instruction;
-    const answer = req?.answer;
+    const questions = req?.questions;
+    const answers = req?.answers;
 
     // while (true) {
     //   const fileName = formData.get(`files[${fileIndex}][fileName]`);
@@ -33,44 +34,15 @@ export async function POST(request: NextRequest) {
       throw new Error("instruction is not specified");
     }
 
-    if (isEmpty(answer)) {
-      throw new Error("answer is not specified");
+    if (isEmpty(questions)) {
+      throw new Error("questions is not specified");
     }
 
-    const questionMessageContent: UserContent = [
-      {
-        type: "text",
-        text: "### Question to Evaluate",
-      },
-    ];
+    if (isEmpty(answers)) {
+      throw new Error("answers is not specified");
+    }
 
-    req?.questions?.forEach(
-      ({ type, value }: { type: string; value: string }) => {
-        switch (type) {
-          case "image": {
-            questionMessageContent.push({
-              type: "image",
-              image: value,
-            });
-            break;
-          }
-          case "audio": {
-            questionMessageContent.push({
-              type: "file",
-              mimeType: "audio/mpeg",
-              data: value,
-            });
-            break;
-          }
-          default:
-            questionMessageContent.push({
-              type: "text",
-              text: String(value),
-            });
-        }
-      }
-    );
-
+    // * instruction
     const instructionMessage: CoreMessage = {
       role: "user",
       content: [
@@ -85,31 +57,82 @@ export async function POST(request: NextRequest) {
       ],
     };
 
-    const questionMessage: CoreMessage = {
+    // * questions
+    const questionsMessageContent: UserContent = [
+      {
+        type: "text",
+        text: "### Question to Evaluate",
+      },
+    ];
+    questions?.forEach(({ type, value }: { type: string; value: string }) => {
+      switch (type) {
+        case "image": {
+          questionsMessageContent.push({
+            type: "image",
+            image: value,
+          });
+          break;
+        }
+        case "audio": {
+          questionsMessageContent.push({
+            type: "file",
+            mimeType: "audio/mpeg",
+            data: value,
+          });
+          break;
+        }
+        default:
+          questionsMessageContent.push({
+            type: "text",
+            text: String(value),
+          });
+      }
+    });
+    const questionsMessage: CoreMessage = {
       role: "user",
-      content: questionMessageContent,
+      content: questionsMessageContent,
     };
 
-    const answerMessage: CoreMessage = {
+    // * answers
+    const answersMessageContent: UserContent = [
+      {
+        type: "text",
+        text: "### Student's Answer",
+      },
+    ];
+    answers?.forEach(({ type, value }: { type: string; value: string }) => {
+      switch (type) {
+        case "image": {
+          answersMessageContent.push({
+            type: "image",
+            image: value,
+          });
+          break;
+        }
+        case "audio": {
+          answersMessageContent.push({
+            type: "file",
+            mimeType: "audio/mpeg",
+            data: value,
+          });
+          break;
+        }
+        default:
+          answersMessageContent.push({
+            type: "text",
+            text: String(value),
+          });
+      }
+    });
+    const answersMessage: CoreMessage = {
       role: "user",
-      content: [
-        {
-          type: "text",
-          text: "### Student's Answer",
-        },
-        {
-          type: "text",
-          text: String(answer),
-        },
-      ],
+      content: answersMessageContent,
     };
-
-    console.log("REQUEST", questionMessage);
 
     // return Response.json({});
 
     const response = await generateText({
-      model: openai(String(model) || "gpt-4o"),
+      model: openai(String(model) || "gpt-4.1"),
       system: `**Role**: You are a Cambridge Assessment English examiner.
 - First of all, you need to remove all previous context.
 
@@ -137,12 +160,11 @@ export async function POST(request: NextRequest) {
   "weakness": "[specific issue with quote]",
   "improvement_suggestion": "[actionable advice]"
 }`,
-      messages: [instructionMessage, questionMessage, answerMessage],
+      messages: [instructionMessage, questionsMessage, answersMessage],
     });
 
     return Response.json({ ...response });
   } catch (error) {
-    console.error(error);
     return Response.json({ text: "", error: getApiErrorMessage(error) });
   }
 }

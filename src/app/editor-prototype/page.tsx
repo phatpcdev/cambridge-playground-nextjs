@@ -3,12 +3,12 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 
-const CambridgePlayground = dynamic(
-  () => import("../components/cambridge-playground"),
+const EditorPrototype = dynamic(
+  () => import("../components/editor-prototype"),
   { ssr: false }
 );
 
-export default function CambridgePlaygroundPage() {
+export default function EditorPrototypePage() {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
@@ -19,5 +19,5 @@ export default function CambridgePlaygroundPage() {
 
   if (!isReady) return null;
 
-  return <CambridgePlayground />;
+  return <EditorPrototype />;
 }
