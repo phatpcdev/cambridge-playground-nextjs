@@ -1,21 +1,38 @@
-import { isEmpty, isNil, isString } from "lodash";
-import { useMemo, useState } from "react";
-import Markdown from "react-markdown";
-import ReactJsonView from "@microlink/react-json-view";
 import { parseJson } from "@/app/utils/string.util";
+import ReactJsonView from "@microlink/react-json-view";
+import axios from "axios";
+import { isEmpty, isNil, isString, keys } from "lodash";
+import { useEffect, useState } from "react";
 
 const CambridgePlayground = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>();
-  const [generation, setGeneration] = useState();
 
-  const [model, setModel] = useState("gpt-4.1");
-  const [evaluationInstruction, setEvaluationInstruction] = useState("");
-  const [questionContent, setQuestionContent] = useState("");
-  const [questionDescription, setQuestionDescription] = useState("");
+  const [model, setModel] = useState("gpt-4o");
+  const [evaluationConfig, setEvaluationConfig] = useState({
+    name: "",
+    instruction: "",
+  });
+  // const [questionFiles, setQuestionFiles] = useState<Record<string, File>>({});
+  const [questions, setQuestions] = useState<
+    {
+      type: string;
+      value: string;
+    }[]
+  >([]);
   const [answer, setAnswer] = useState("");
 
-  const [showCopiedText, setShowCopiedText] = useState(false);
+  const [storedEvaluationConfigs, setStoredEvaluationConfigs] = useState(() => {
+    const evaluationConfigs = parseJson(
+      localStorage.getItem("EVALUATION_CONFIGS")
+    );
+
+    return isNil(evaluationConfigs) ? {} : evaluationConfigs;
+  });
+
+  // const [showCopiedText, setShowCopiedText] = useState(false);
+  const [serverResponse, setServerResponse] =
+    useState<Record<string, string>>();
 
   const sample: Record<
     string,
@@ -39,178 +56,273 @@ const CambridgePlayground = () => {
     },
   };
 
-  const markdown = useMemo(() => {
-    return `**Role**: You are a Cambridge Assessment English examiner. Strictly follow the scoring criteria below.
+  //     const markdown = useMemo(() => {
+  //       return `**Role**: You are a Cambridge Assessment English examiner. Strictly follow the scoring criteria below.
 
-### Evaluation Instructions
-${evaluationInstruction}
+  //   ### Evaluation Instructions
+  //   ${evaluationConfig.instruction}
 
-### Question to Evaluate
-- **Title**: ${questionContent}
-- **Description**: ${questionDescription}
+  //   ### Question to Evaluate
+  //   - **Title**: ${questionContent}
+  //   - **Description**: ${questionDescription}
 
-### Student's Answer
-${answer}
+  //   ### Student's Answer
+  //   ${answer}
 
----
+  //   ---
 
-### Scoring Task
-1. **Scoring Criteria Validation**: 
-   - Validate the criterion input is valid or not
-   - The length of each criterion string is not too short.
+  //   ### Scoring Task
+  //   1. **Scoring Criteria Validation**:
+  //      - Validate the criterion input is valid or not
+  //      - The length of each criterion string is not too short.
 
-2. **Score Assignment**: 
-   - Apply the Cambridge band descriptors from the Evaluation Instructions
-   - Assign a numerical score
+  //   2. **Score Assignment**:
+  //      - Apply the Cambridge band descriptors from the Evaluation Instructions
+  //      - Assign a numerical score
 
-3. **Feedback Generation**:
-   - Highlight 1 strength and 1 weakness specific to the answer
-   - Reference exact phrases/examples from the student's answer
-   - Suggest 1 concrete improvement
+  //   3. **Feedback Generation**:
+  //      - Highlight 1 strength and 1 weakness specific to the answer
+  //      - Reference exact phrases/examples from the student's answer
+  //      - Suggest 1 concrete improvement
 
-4. **Output Format**: respond with a JSON object in the following format.\n
-{
-  "score": [number],
-  "band_descriptor": "[e.g., Mover]",
-  "strength": "[specific observation with quote]",
-  "weakness": "[specific issue with quote]",
-  "improvement_suggestion": "[actionable advice]"
-}`;
-  }, [evaluationInstruction, questionContent, questionDescription, answer]);
+  //   4. **Output Format**: respond with a JSON object in the following format.\n
+  //   {
+  //     "score": [number],
+  //     "band_descriptor": "[e.g., Mover]",
+  //     "strength": "[specific observation with quote]",
+  //     "weakness": "[specific issue with quote]",
+  //     "improvement_suggestion": "[actionable advice]"
+  //   }`;
+  //     }, [
+  //       evaluationConfig.instruction,
+  //       answer,
+  //     ]);
 
-  const scheme = useMemo(() => {
-    return [
-      {
-        id: "part_id",
-        name: "part_name",
-        instructions: [
-          {
-            type: "text",
-            value: "question instruction text",
-          },
-          {
-            type: "image",
-            value: "question_instruction_image_url",
-          },
-          {
-            type: "audio",
-            value: "question_instruction_audio_url",
-          },
-        ],
-        contents: [
-          {
-            type: "text",
-            value: "Part instruction",
-          },
-          {
-            type: "image",
-            value: "img_url",
-          },
-          {
-            type: "audio",
-            value: "audio_url",
-          },
-        ],
-        groups: [
-          {
-            id: "group_id",
-            questions: [
-              {
-                id: "question_id",
-                instructions: [
-                  {
-                    type: "text",
-                    value: "question instruction text",
-                  },
-                  {
-                    type: "image",
-                    value: "question_instruction_image_url",
-                  },
-                  {
-                    type: "audio",
-                    value: "question_instruction_audio_url",
-                  },
-                ],
-                contents: [
-                  {
-                    type: "text",
-                    value: "Part instruction",
-                  },
-                  {
-                    type: "image",
-                    value: "img_url",
-                  },
-                  {
-                    type: "audio",
-                    value: "audio_url",
-                  },
-                ],
-                text: questionContent,
-                description: questionDescription,
-                answers: [
-                  {
-                    id: "answer_id",
-                    configs: {
-                      text: "",
-                      image: "",
-                      audio: "",
-                      extras: "json string",
-                    },
-                    user_value: answer,
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    ];
-  }, [questionContent, questionDescription, answer]);
+  //   const scheme = useMemo(() => {
+  //     return [
+  //       {
+  //         id: "part_id",
+  //         name: "part_name",
+  //         instructions: [
+  //           {
+  //             type: "text",
+  //             value: "question instruction text",
+  //           },
+  //           {
+  //             type: "image",
+  //             value: "question_instruction_image_url",
+  //           },
+  //           {
+  //             type: "audio",
+  //             value: "question_instruction_audio_url",
+  //           },
+  //         ],
+  //         contents: [
+  //           {
+  //             type: "text",
+  //             value: "Part instruction",
+  //           },
+  //           {
+  //             type: "image",
+  //             value: "img_url",
+  //           },
+  //           {
+  //             type: "audio",
+  //             value: "audio_url",
+  //           },
+  //         ],
+  //         groups: [
+  //           {
+  //             id: "group_id",
+  //             questions: [
+  //               {
+  //                 id: "question_id",
+  //                 instructions: [
+  //                   {
+  //                     type: "text",
+  //                     value: "question instruction text",
+  //                   },
+  //                   {
+  //                     type: "image",
+  //                     value: "question_instruction_image_url",
+  //                   },
+  //                   {
+  //                     type: "audio",
+  //                     value: "question_instruction_audio_url",
+  //                   },
+  //                 ],
+  //                 contents: [
+  //                   {
+  //                     type: "text",
+  //                     value: "Part instruction",
+  //                   },
+  //                   {
+  //                     type: "image",
+  //                     value: "img_url",
+  //                   },
+  //                   {
+  //                     type: "audio",
+  //                     value: "audio_url",
+  //                   },
+  //                 ],
+  //                 text: questionContent,
+  //                 description: questionDescription,
+  //                 answers: [
+  //                   {
+  //                     id: "answer_id",
+  //                     configs: {
+  //                       text: "",
+  //                       image: "",
+  //                       audio: "",
+  //                       extras: "json string",
+  //                     },
+  //                     user_value: answer,
+  //                   },
+  //                 ],
+  //               },
+  //             ],
+  //           },
+  //         ],
+  //       },
+  //     ];
+  //   }, [questionContent, questionDescription, answer]);
 
   const handleAddSampleIntoFormData = (sampleId: string) => {
     const sampleInfo = sample[sampleId];
 
-    setEvaluationInstruction(sampleInfo.evaluationInstruction);
-    setQuestionContent(sampleInfo.questionContent);
-    setQuestionDescription(sampleInfo.questionDescription);
+    setEvaluationConfig({
+      name: sampleId,
+      instruction: sampleInfo.evaluationInstruction,
+    });
+
+    setQuestions([
+      {
+        type: "text",
+        value: sampleInfo.questionContent,
+      },
+    ]);
     setAnswer(sampleInfo.answer);
   };
 
   const onFormSubmit = async () => {
-    setGeneration(undefined);
+    setServerResponse(undefined);
     setError(undefined);
     setIsLoading(true);
 
-    await fetch("/api/generate-text", {
-      method: "POST",
-      body: JSON.stringify({
-        prompt: markdown,
-        model,
-      }),
-    })
-      .then((response) => {
-        response.json().then((json) => {
-          if (
-            isNil(json?.text) ||
-            isEmpty(json?.text) ||
-            !isEmpty(json?.error)
-          ) {
-            console.error("PLAYGROUND_ERROR:", json.error);
+    const evaluationConfigsJson = parseJson(
+      localStorage.getItem("EVALUATION_CONFIGS")
+    );
 
-            setError(
-              "No response from server. Check console log for more detail"
-            );
+    const newEvaluationConfigsJson = {
+      ...evaluationConfigsJson,
+      [evaluationConfig.name]: evaluationConfig.instruction,
+    };
 
-            return;
-          }
+    localStorage.setItem(
+      "EVALUATION_CONFIGS",
+      JSON.stringify(newEvaluationConfigsJson)
+    );
 
-          setGeneration(json.text);
-        });
+    setStoredEvaluationConfigs(newEvaluationConfigsJson);
+
+    // const formData = new FormData();
+
+    // formData.append("model", model);
+    // formData.append("instruction", evaluationConfig.instruction);
+
+    // questions.forEach((question, index) => {
+    //   formData.append(`questions[${index}][type]`, question.type);
+    //   formData.append(`questions[${index}][value]`, question.value);
+    // });
+
+    // entries(questionFiles).forEach(([fileName, file], index) => {
+    //   formData.append(`files[${index}][fileName]`, fileName);
+    //   formData.append(`files[${index}][file]`, file);
+    // });
+
+    // formData.append("answer", answer);
+
+    await axios
+      .request({
+        method: "post",
+        url: "/api/generate-text",
+        data: {
+          model,
+          instruction: evaluationConfig.instruction,
+          questions,
+          answer,
+        },
+      })
+      .then(({ data }) => {
+        setServerResponse(data);
+
+        if (isNil(data?.text) || isEmpty(data?.text) || !isEmpty(data?.error)) {
+          console.error("PLAYGROUND_ERROR:", data.error);
+
+          setError(
+            "No response from server. Check console log for more detail"
+          );
+
+          return;
+        }
       })
       .finally(() => {
         setIsLoading(false);
       });
+
+    // await fetch("/api/generate-text", {
+    //   method: "POST",
+    //   body: JSON.stringify({
+    //     prompt: markdown,
+    //     model,
+    //   }),
+    // })
+    //   .then((response) => {
+    //     response.json().then((json) => {
+    //       if (
+    //         isNil(json?.text) ||
+    //         isEmpty(json?.text) ||
+    //         !isEmpty(json?.error)
+    //       ) {
+    //         console.error("PLAYGROUND_ERROR:", json.error);
+
+    //         setError(
+    //           "No response from server. Check console log for more detail"
+    //         );
+
+    //         return;
+    //       }
+
+    //       setGeneration(json.text);
+    //     });
+    //   })
+    //   .finally(() => {
+    //     setIsLoading(false);
+    //   });
   };
+
+  console.log("questions", questions);
+
+  useEffect(() => {
+    const arStoredEvaluationConfigsKey = keys(storedEvaluationConfigs);
+    if (arStoredEvaluationConfigsKey.length === 0) return;
+
+    if (
+      !(
+        isEmpty(evaluationConfig?.name) &&
+        isEmpty(evaluationConfig?.instruction)
+      )
+    ) {
+      return;
+    }
+
+    const firstConfigKey = arStoredEvaluationConfigsKey[0];
+
+    setEvaluationConfig({
+      name: firstConfigKey,
+      instruction: storedEvaluationConfigs[firstConfigKey],
+    });
+  }, [evaluationConfig, storedEvaluationConfigs]);
 
   return (
     <form className="flex h-screen w-screen flex-col gap-10 overflow-x-hidden px-8 pb-32 pt-8">
@@ -233,67 +345,223 @@ ${answer}
           </div>
 
           <div className="flex flex-col gap-2">
-            <label>Select AI model</label>
-            <select
-              className="w-40"
-              value={model}
-              onChange={(event) => {
-                setModel(event.target.value);
-              }}
-            >
-              <option value={"gpt-4.1"}>gpt-4.1</option>
-              <option value={"gpt-4o"}>gpt-4o</option>
-              <option value={"o4-mini"}>o4-mini</option>
-              <option value={"o3"}>o3</option>
-              <option value={"o3-mini"}>o3-mini</option>
-            </select>
-          </div>
+            <label>Evaluation configs</label>
 
-          <div className="flex flex-col gap-2">
-            <label>Evaluation Instructions</label>
-            <textarea
-              rows={3}
-              className="rounded-sm border border-solid border-gray-300"
-              value={evaluationInstruction}
-              onChange={(event) => {
-                setEvaluationInstruction(event.target.value);
-              }}
-            ></textarea>
+            <label className="ml-2 flex items-center gap-2">
+              <span className="text-sm">select stored configs:</span>
+
+              <select
+                className="min-w-20 rounded-sm border border-solid border-gray-300"
+                onChange={(event) => {
+                  const configKey = event.target.value;
+
+                  setEvaluationConfig({
+                    name: configKey,
+                    instruction: storedEvaluationConfigs[configKey],
+                  });
+                }}
+              >
+                {keys(storedEvaluationConfigs).map((k) => {
+                  return (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+
+            <label className="ml-2 flex flex-col">
+              <span className="text-sm">name(level):</span>
+
+              <input
+                className="rounded-sm border border-solid border-gray-300"
+                value={evaluationConfig.name}
+                onChange={(event) => {
+                  setEvaluationConfig((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }));
+                }}
+              />
+            </label>
+
+            <label className="ml-2 flex flex-col">
+              <span className="text-sm">instruction:</span>
+              <textarea
+                rows={3}
+                className="rounded-sm border border-solid border-gray-300"
+                value={evaluationConfig.instruction}
+                onChange={(event) => {
+                  setEvaluationConfig((prev) => ({
+                    ...prev,
+                    instruction: event.target.value,
+                  }));
+                }}
+              ></textarea>
+            </label>
           </div>
 
           <div className="flex flex-col gap-2">
             <label>Question configs</label>
 
-            <label className="ml-2 flex flex-col">
-              <span className="text-sm">content:</span>
-              <textarea
-                rows={3}
-                className="rounded-sm border border-solid border-gray-300"
-                value={questionContent}
-                onChange={(event) => {
-                  setQuestionContent(event.target.value);
-                }}
-              ></textarea>
-            </label>
+            {questions.map(({ type, value }, index) => {
+              switch (type) {
+                case "image":
+                  return (
+                    <input
+                      key={index}
+                      className="rounded-sm border border-solid border-gray-300"
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => {
+                        const files = event.target.files;
 
-            <label className="ml-2 flex flex-col">
-              <span className="text-sm">description:</span>
-              <textarea
-                rows={3}
-                className="rounded-sm border border-solid border-gray-300"
-                value={questionDescription}
-                onChange={(event) => {
-                  setQuestionDescription(event.target.value);
+                        if (isNil(files) || isNil(files[0])) return;
+
+                        // const fileId = `file_${index}`;
+
+                        // setQuestionFiles((prev) => {
+                        //   return {
+                        //     ...prev,
+                        //     [fileId]: files[0],
+                        //   };
+                        // });
+
+                        // setQuestions((prev) => {
+                        //   const newQuestions = [...prev];
+                        //   newQuestions[index].value = fileId;
+
+                        //   return newQuestions;
+                        // });
+
+                        const fr = new FileReader();
+
+                        fr.readAsDataURL(files[0]);
+
+                        fr.addEventListener("load", (event) => {
+                          setQuestions((prev) => {
+                            const newQuestions = [...prev];
+                            newQuestions[index].value = String(
+                              event.target?.result
+                            );
+
+                            return newQuestions;
+                          });
+                        });
+                      }}
+                    />
+                  );
+                case "audio":
+                  return (
+                    <input
+                      key={index}
+                      className="rounded-sm border border-solid border-gray-300"
+                      type="file"
+                      accept="audio/mpeg"
+                      onChange={(event) => {
+                        const files = event.target.files;
+
+                        if (isNil(files) || isNil(files[0])) return;
+
+                        // const fileId = `file_${index}`;
+
+                        // setQuestionFiles((prev) => {
+                        //   return {
+                        //     ...prev,
+                        //     [fileId]: files[0],
+                        //   };
+                        // });
+
+                        // setQuestions((prev) => {
+                        //   const newQuestions = [...prev];
+                        //   newQuestions[index].value = fileId;
+
+                        //   return newQuestions;
+                        // });
+
+                        const fr = new FileReader();
+
+                        fr.readAsDataURL(files[0]);
+
+                        fr.addEventListener("load", (event) => {
+                          setQuestions((prev) => {
+                            const newQuestions = [...prev];
+                            newQuestions[index].value = String(
+                              event.target?.result
+                            );
+
+                            return newQuestions;
+                          });
+                        });
+                      }}
+                    />
+                  );
+                default:
+                  return (
+                    <textarea
+                      key={index}
+                      rows={3}
+                      className="rounded-sm border border-solid border-gray-300"
+                      value={String(value)}
+                      onChange={(event) => {
+                        setQuestions((prev) => {
+                          const newQuestions = [...prev];
+                          newQuestions[index].value = event.target.value;
+
+                          return newQuestions;
+                        });
+                      }}
+                    ></textarea>
+                  );
+              }
+            })}
+
+            <div className="flex items-center gap-4 [&>button]:cursor-pointer">
+              <button
+                type="button"
+                onClick={() => {
+                  setQuestions((prev) => [
+                    ...prev,
+                    {
+                      type: "text",
+                      value: "",
+                    },
+                  ]);
                 }}
-              ></textarea>
-            </label>
-            {/* <div>
-              <label className="text-sm">media:</label>
-              <div className="flex flex-wrap items-center gap-3">
-                <button>➕ image</button>
-                <button>➕ audio</button>
-              </div>
-            </div> */}
+              >
+                ➕ text
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuestions((prev) => [
+                    ...prev,
+                    {
+                      type: "image",
+                      value: "",
+                    },
+                  ]);
+                }}
+              >
+                ➕ image
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  alert("Coming soon");
+                  // setQuestions((prev) => [
+                  //   ...prev,
+                  //   {
+                  //     type: "audio",
+                  //     value: "",
+                  //   },
+                  // ]);
+                }}
+              >
+                ➕ audio (WIP)
+              </button>
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">
@@ -308,6 +576,23 @@ ${answer}
               }}
             ></textarea>
           </div>
+
+          <div className="flex flex-col gap-2">
+            <label>Select AI model</label>
+            <select
+              className="w-40 rounded-sm border border-solid border-gray-300"
+              value={model}
+              onChange={(event) => {
+                setModel(event.target.value);
+              }}
+            >
+              <option value={"gpt-4o"}>gpt-4o</option>
+              <option value={"gpt-4.1"}>gpt-4.1</option>
+              <option value={"o4-mini"}>o4-mini</option>
+              <option value={"o3"}>o3</option>
+              <option value={"o3-mini"}>o3-mini</option>
+            </select>
+          </div>
         </div>
 
         <div className="flex basis-1/2 flex-col rounded-md">
@@ -319,7 +604,7 @@ ${answer}
               ) : (
                 <ReactJsonView
                   name={null}
-                  src={parseJson(generation) || {}}
+                  src={parseJson(serverResponse?.text) || {}}
                   displayDataTypes={false}
                   displayObjectSize={false}
                 />
@@ -331,16 +616,16 @@ ${answer}
 
           <div>
             <div className="flex items-center gap-2">
-              <p className="font-bold">Prompt:</p>
+              <p className="font-bold">API response:</p>
 
-              {showCopiedText ? (
+              {/* {showCopiedText ? (
                 <p className="text-sm font-medium text-green-500">Copied ✅</p>
               ) : (
                 <button
                   type="button"
                   className="cursor-pointer opacity-40 hover:opacity-100"
                   onClick={() => {
-                    navigator.clipboard.writeText(markdown);
+                    // navigator.clipboard.writeText(markdown);
 
                     setShowCopiedText(true);
 
@@ -362,17 +647,25 @@ ${answer}
                     />
                   </svg>
                 </button>
-              )}
+              )} */}
             </div>
 
             <div className="relative rounded-lg bg-slate-200 p-3">
-              <details>
+              <ReactJsonView
+                name={null}
+                src={serverResponse || {}}
+                displayDataTypes={false}
+                displayObjectSize={false}
+                collapsed
+              />
+
+              {/* <details>
                 <summary>detail</summary>
 
                 <div className="all-revert">
                   <Markdown>{markdown}</Markdown>
                 </div>
-              </details>
+              </details> */}
             </div>
           </div>
           <div className="mt-4">
@@ -381,13 +674,13 @@ ${answer}
             </div>
 
             <div className="relative rounded-lg bg-slate-200 p-3">
-              <ReactJsonView
+              {/* <ReactJsonView
                 name={null}
                 src={scheme || {}}
                 displayDataTypes={false}
                 displayObjectSize={false}
                 collapsed
-              />
+              /> */}
             </div>
           </div>
         </div>
@@ -401,8 +694,8 @@ ${answer}
             onClick={onFormSubmit}
             disabled={
               isLoading ||
-              isEmpty(evaluationInstruction) ||
-              isEmpty(questionContent) ||
+              isEmpty(evaluationConfig?.instruction) ||
+              isEmpty(questions) ||
               isEmpty(answer)
             }
           >
