@@ -295,6 +295,7 @@ const CambridgePlayground = () => {
 
     await axios
       .request({
+        baseURL: process.env.NEXT_PUBLIC_APP_BASE_PATH,
         method: "post",
         url: "/api/generate-text",
         data: {
